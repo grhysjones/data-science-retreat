@@ -1,0 +1,925 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Productive machine learning in Python with Palladium and scikit-learn</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+    <style type="text/css">
+      @import url(https://fonts.googleapis.com/css?family=Yanone+Kaffeesatz);
+      @import url(https://fonts.googleapis.com/css?family=Droid+Serif:400,700,400italic);
+      @import url(https://fonts.googleapis.com/css?family=Ubuntu+Mono:400,700,400italic);
+
+      body { font-family: 'Droid Serif'; }
+      h1, h2, h3 {
+        font-family: 'Yanone Kaffeesatz';
+        font-weight: normal;
+      }
+      .remark-code, .remark-inline-code { font-family: 'Ubuntu Mono'; }
+
+    </style>
+  </head>
+  <body>
+    <textarea id="source">
+
+class: center, middle
+
+# Productive machine learning in Python
+
+Daniel Nouri, Natural Vision UG, datascienceresearch.com 2018
+
+---
+
+# Agenda
+
+We'll focus on two things:
+
+- Development cycle and putting models into production scalably
+- Common tasks in Machine Learning projects
+
+1. Who am I?
+2. Palladium: Overview
+3. Palladium: Development cycle
+4. Hyperparameter search: Grid Search
+5. Palladium: Webservice
+6. scikit-learn: Pipelines
+7. Skorch: Neural networks
+8. Dask: Parallelisation
+9. Palladium: Datasets, OpenML
+10. Regression and classification
+11. Skorch: Sentiment analysis with RNNs
+
+---
+
+# Download slides and code
+
+Download this repository to be able to run code examples:
+
+```bash
+$ git clone https://github.com/dnouri/dsr-2018.git
+```
+
+Slides are online at:
+
+https://dnouri.github.io/dsr-2018/
+
+---
+
+# whoami
+
+- Machine Learning Consultant ([Natural Vision](http://naturalvision.de))
+  * Development and training (Python and Machine Learning)
+- Clients: Otto Group, IKEA, Luxottica
+- Strengths:
+  * Python (since 2000)
+  * Open Source (since 2003)
+  * Deep Learning (since 2014)
+  * Software development best practices (testing, pairing, tutorials)
+
+---
+
+# Palladium: Overview
+
+
+Palladium emerged from a Otto Group BI project to predict parcel
+delivery times.
+
+These are the requirements that Palladium fulfills for the *Otto Group
+BI*:
+
+- Smooth transition from prototypes to machine learning models in
+  production
+- Avoid boilerplate in ML projects
+- High scalability
+- Avoid license costs
+
+A presentation of Palladium from PyData 2016 is found [here
+(PDF)](./resources/palladium-pydata-lattner.pdf).
+
+We will start by implementing a classifier with Palladium
+
+---
+
+# Iris dataset
+
+In our first example in `step1`, we will make use of the classic
+"Iris" machine learning dataset from 1936.
+
+`step1/iris.data` contains the data in CSV format.  Note that the
+first line for column names is missing:
+
+```csv
+5.2,3.5,1.5,0.2,Iris-setosa
+4.3,3.0,1.1,0.1,Iris-setosa
+5.6,3.0,4.5,1.5,Iris-versicolor
+6.3,3.3,6.0,2.5,Iris-virginica
+...
+```
+
+The columns are:
+
+- `sepal length`
+- `sepal width`
+- `petal width`
+- `petal width`
+- `species`
+
+---
+
+# Iris as a classification problem
+
+We want to implement a classifier that predicts the species based on
+the four attributes.
+
+![:scale 50%](./resources/iris-scatter.png)
+
+---
+
+# Palladium: Reading the dataset
+
+You'll find a configuration file in `step1/config.py`.  Therein,
+you'll find the definition of two `dataset_loader`s, which are
+responsible for reading the dataset:
+
+```python
+{
+    'dataset_loader_train': {
+        '__factory__': 'palladium.dataset.Table',
+        'path': 'iris.data',
+        'names': [
+            'sepal length',
+            'sepal width',
+            'petal length',
+            'petal width',
+            'species',
+        ],
+        'target_column': 'species',
+        'sep': ',',
+        'nrows': 100,
+    },
+
+    'dataset_loader_test': {
+        '__copy__': 'dataset_loader_train',
+        'nrows': None,
+        'skiprows': 100,
+    },
+}
+```
+
+---
+
+# Palladium: Configuration and code separated
+
+Palladium encourages the separatin of configuration and code.  Machine
+Learning projects typically have a lot of constants and configuration.
+Here are some examples:
+
+- Path to the dataset
+
+```python
+        'path': 'iris.data',
+```
+
+- Database configuration
+
+```python
+        'url': 'sqlite:///iris-model.db',
+```
+
+- Hyperparameters of our models
+
+```python
+        'C': 0.1,
+```
+
+- Differing configuration for production and development environments
+
+---
+
+# Palladium: Model definition
+
+```python
+    'model': {
+        '__factory__': 'sklearn.linear_model.LogisticRegression',
+        'C': 0.1,
+    },
+
+    'model_persister': {
+        '__factory__': 'palladium.persistence.Database',
+        'url': 'sqlite:///iris-model.db',
+    },
+```
+
+The model definition uses the configuration key `model`.  As our
+classifier, we'll make use of the implementation of [Logistic
+Regression](http://scikit-learn.org/stable/modules/generated/sklearn.linear_model.LogisticRegression.html)
+out of scikit-learn.
+
+The `model_persister` entry defines where we'll save the trained model
+and where to read it back from.  The configuration above configures a
+SQLite database to act as the model storage.
+
+---
+
+# Palladium: Installation
+
+Let's install Palladium.  We'll first create a
+[virtualenv](https://virtualenv.pypa.io), and install dependencies
+therein:
+
+```bash
+$ python3 -m venv .
+$ source bin/activate  # or: `scripts/activate.bat` on Windows
+$ pip install -U pip
+$ pip install -r step1/requirements.txt
+Collecting palladium (from -r step1/requirements.txt (line 1))...
+...
+Successfully installed ...
+```
+
+If you want to use [Conda](https://conda.io) instead because maybe
+you're on Windows and don't have Visual Code installed:
+
+```bash
+$ conda install ujson
+$ pip install -r requirements.txt
+```
+
+---
+
+# Palladium: Training a model
+
+We already have all pieces in place to fit our first model.  To fit,
+we'll use Palladium's `pld-fit` command along with the `--evaluate`
+option:
+
+On Linux:
+
+```bash
+$ cd step1
+$ export PALLADIUM_CONFIG=config.py
+$ pld-fit --evaluate
+INFO:palladium:Loading data...
+...
+INFO:palladium:Train score: 0.9
+...
+INFO:palladium:Test score:  0.82
+...
+INFO:palladium:Wrote model with version 1.
+```
+
+On Windows:
+
+```shell
+$ cd step1
+$ set PALLADIUM_CONFIG=config.py
+$ pld-fit --evaluate
+```
+
+Our classifier reaches an accuracy of 90% on the training set and 82%
+on the test set.
+
+---
+
+# Regularization
+
+So what is this `C` parameter of our model about?
+
+![:scale 80%](./resources/ng-regularized-lr.png)
+
+---
+
+# Regularization (2)
+
+From the [scikit-learn
+docs](http://scikit-learn.org/stable/modules/generated/sklearn.linear_model.LogisticRegression.html):
+
+> `C`: Inverse of regularization strength; must be a positive
+float. Like in support vector machines, smaller values specify
+stronger regularization.
+
+## Exercise 1:
+
+Can we find a better C parameter such that our score on the test set
+improves?
+
+---
+
+# Grid Search
+
+The search for optimal hyperparameters is a very common task in
+machine learning.  In our example, doing the search by hand was still
+easy, but more complex models and pipelines often have a big number of
+these parameters.
+
+There's different options to perform the search, scikit-learn itself
+implements a [number of these
+algorithms](http://scikit-learn.org/stable/modules/grid_search.html).
+One of these algorithms is called *Grid Search*.
+
+---
+
+# Grid Search: Application
+
+`step2/config.py` contains the parametrization of our Grid Search:
+
+```python
+    'grid_search': {
+        'param_grid': {
+            'C': [0.1, 1, 10, 100, 1000],
+         },
+        'cv': 8,
+        'verbose': 4,
+        'n_jobs': -1,
+    },
+```
+
+We use Palladium's `pld-grid-search` command to execute the search:
+
+```bash
+$ cd ../step2
+$ pld-grid-search
+```
+
+---
+
+# Grid Search: Interpreting the output
+
+```
+   mean_fit_time  mean_score_time  mean_test_score  mean_train_score param_C
+3       0.000778         0.000188             0.98          0.989990     100
+4       0.000860         0.000221             0.98          1.000000    1000
+2       0.000691         0.000198             0.96          0.972828      10
+1       0.000675         0.000199             0.95          0.955667       1
+0       0.001668         0.000427             0.87          0.872882     0.1
+```
+
+A low value for C means stronger regularization.  The effect here is
+"underfitting", which is characterized by a low train and low test
+score.
+
+![:scale 100%](./resources/sklearn-overfitting-underfitting.png)
+
+---
+
+# Palladium: Webservice
+
+Palladium implements a simple webservice, with which we can address
+our trained model via HTTP and make predictions.
+
+First we need to configure the webservice.  In our Iris example, this
+is what we need:
+
+```python
+    'predict_service': {
+        '__factory__': 'palladium.server.PredictService',
+        'mapping': [
+            ('sepal length', 'float'),
+            ('sepal width', 'float'),
+            ('petal length', 'float'),
+            ('petal width', 'float'),
+        ],
+    },
+```
+
+You can find this configuration in `step3/config.py`.
+
+---
+
+# Palladium: Running the webservice
+
+```bash
+$ cd ../step3
+$ pld-fit --evaluate
+$ pld-devserver
+```
+
+We can now call the service via HTTP GET.  Follow this link:
+
+http://localhost:5000/predict?sepal%20length=6.3&sepal%20width=2.5&petal%20length=4.9&petal%20width=1.5
+
+This is the result:
+
+```json
+{
+    "metadata": {"error_code":0,"status":"OK"},
+    "result":   "Iris-virginica"
+}
+```
+
+---
+
+# Palladium: Python API
+
+We want to write a script to produce the following output:
+
+```bash
+$ python predict.py 6.3 2.5 4.9 1.5
+Iris-setosa: 0.0%
+Iris-versicolor: 44.9%
+Iris-virginica: 55.1%
+```
+
+Here's the implementation in `step3/predict.py`:
+
+```python
+import sys
+
+from palladium.config import get_config
+
+
+def predict(features):
+    model = get_config()['model_persister'].read()
+    result = model.predict_proba([features])[0]
+    for class_, proba in zip(model.classes_, result):
+        print("{}: {:.1f}%".format(class_, proba*100))
+
+
+if __name__ == '__main__':
+    predict([float(v) for v in sys.argv[1:]])
+```
+
+---
+
+# Skorch
+
+[Skorch](https://skorch.readthedocs.io/) is a scikit-learn compatible
+library for neural networks.  It's based on [PyTorch](https://pytorch.org).
+
+## Installation
+
+```bash
+$ pip install -r step4/requirements-base.txt
+```
+
+Look for the way to install PyTorch on your system on
+http://pytorch.org
+
+If you are running Linux and you don't have CUDA, try this:
+
+```bash
+$ pip install -r step4/requirements-cpu.txt
+```
+
+If you're running Linux and you have CUDA installed, then this should
+work:
+
+```bash
+$ pip install -r step4/requirements-gpu.txt
+```
+
+---
+
+# Skorch: Iris
+
+We'll continue working with the Iris dataset.  Instead of a logistic
+regression, we'll use a neural network to do the classification.
+
+You'll find the implementation of the neural network and supporting
+code in `step4/model.py`.  The configuration is in `step4/config.py`.
+Let's take a look at the most important parts.
+
+A large part of our configuration looks exactly the same as in the
+last step, namely `dataset_loader_train`, `dataset_loader_test` and
+`model_persister`.
+
+The `model` entry is where things get more interesting:
+
+```python
+    'model': {
+        '__factory__': 'model.create_pipeline',
+    },
+```
+
+Our model is produced by a custom function called `create_pipeline`.
+
+---
+
+# scikit-learn: Pipelines
+
+A `sklearn.pipeline.Pipeline` is a pipeline of transforms with a final
+estimator (classifier or regressor).  Here's the implementation of
+`model.create_pipeline`:
+
+```python
+def create_pipeline(
+    device='cpu',  # or 'cuda'
+    max_epochs=50,
+    lr=0.1,
+    **kwargs
+):
+    return PipelineY([
+        ('cast', Cast(np.float32)),
+        ('scale', StandardScaler()),
+        ('net', NeuralNetClassifier(
+            MyModule,
+            device=device,
+            max_epochs=max_epochs,
+            lr=lr,
+            train_split=None,
+            **kwargs,
+        ))],
+        y_transformer=LabelEncoder(),
+        predict_use_inverse=True,
+        )
+```
+
+---
+
+# scikit-learn: StandardScaler
+
+`StandardScaler` is one of the transforms that scikit-learn itself
+implements.  This transform standardizes features by removing the mean
+and scaling to unit variance
+
+From the [scikit-learn
+docs](http://scikit-learn.org/stable/modules/generated/sklearn.preprocessing.StandardScaler.html):
+
+> Standardization of a dataset is a common requirement for many
+machine learning estimators: they might behave badly if the individual
+features do not more or less look like standard normally distributed
+data (e.g. Gaussian with 0 mean and unit variance).
+
+> For instance many elements used in the objective function of a
+learning algorithm (such as the RBF kernel of Support Vector Machines
+or the L1 and L2 regularizers of linear models) assume that all
+features are centered around 0 and have variance in the same
+order. **If a feature has a variance that is orders of magnitude
+larger than others, it might dominate the objective function and make
+the estimator unable to learn from other features correctly as
+expected.**
+
+---
+
+# Skorch: NeuralNetClassifier
+
+```python
+from skorch import NeuralNetClassifier
+
+NeuralNetClassifier(
+    MyModule,
+    device='cpu',
+    max_epochs=50,
+    lr=0.1,
+    train_split=None,
+    **kwargs,
+)
+```
+
+Class `NeuralNetClassifier` contains the training logic, as well as
+methods such as `fit` and `predict`, for compatibility with
+scikit-learn.
+
+---
+
+# PyTorch: nn.Module
+
+Our PyTorch `Module` contains the definition of our neural network.
+We instantiate the layers of our network in `__init__`.  In method
+`forward` we accept the data (`X`) and run the data through our
+layers:
+
+```python
+class MyModule(nn.Module):
+    def __init__(self, num_inputs=4, num_units=10, num_outputs=3):
+        super(MyModule, self).__init__()
+
+        self.dense0 = nn.Linear(num_inputs, num_units)
+        self.nonlin = F.relu
+        self.dropout = nn.Dropout(0.5)
+        self.dense1 = nn.Linear(num_units, 10)
+        self.output = nn.Linear(10, num_outputs)
+
+    def forward(self, X, **kwargs):
+        X = self.nonlin(self.dense0(X))
+        X = self.dropout(X)
+        X = F.relu(self.dense1(X))
+        X = F.softmax(self.output(X), dim=-1)
+        return X
+```
+
+---
+
+# Learning rate
+
+One of the most important hyperparameters of neural networks is the
+*learning rate*.  It defines, how large our iterative steps are during
+gradient descent.  Gradient descent is the optimization algorithm
+that's used in neural networks and many other machine learning
+algorithms.
+
+![:scale 80%](./resources/ng-learning-rate.png)
+
+---
+
+# Grid Search: Network hyperparameters
+
+```python
+    'grid_search': {
+        'param_grid': {
+            'net__lr': [0.03, 0.1, 0.3],
+        },
+        'cv': 5,
+        'verbose': 4,
+        'n_jobs': 1,
+    },
+```
+
+```bash
+$ pld-grid-search
+```
+
+## Exercise 2:
+
+Which learning rate is the best?
+
+---
+
+# Grid Search: Network hyperparameters (2)
+
+## Exercise 3:
+
+In `step4/config.py`, look for the comment *YOUR CODE HERE*.  Try to
+find a good combination of learning epochs (`net__max_epochs`) and
+learning rate (`net__lr`).  Can you find a combination that gets a
+`mean_test_score` of 96% or better?
+
+---
+
+# Skorch: LRScheduler and EarlyStopping
+
+- The
+  [skorch.callbacks.LRScheduler](https://skorch.readthedocs.io/en/latest/callbacks.html#skorch.callbacks.LRScheduler)
+  allows us to adapt the learning rate during training, based on
+  arbitrary conditions.
+
+- The
+  [skorch.callbacks.EarlyStopping](https://skorch.readthedocs.io/en/latest/callbacks.html#skorch.callbacks.EarlyStopping)
+  callback allows the stopping of training if further training leads
+  to no more improvements.
+
+---
+
+# Grid Search: Parallelization with Dask
+
+Wenn wir jetzt erwaegen, noch weitere Hyperparameter in die Suche
+reinzunehmen, wie etwa die Zahl der Neuronen im *Hidden Layer*
+(`num_units`), dann wird klar, dass diese Suche bald sehr lange dauern
+kann:
+
+```python
+    'grid_search': {
+        'param_grid': {  # 3 * 4 * 4 * 5 = 240 fits!
+            'net__lr': [0.03, 0.1, 0.3],
+            'net__max_epochs': [50, 100, 200, 400],
+            'net__num_units': [5, 10, 20, 40],
+        },
+```
+
+Bei typischen Machine Learning Projekten ist die Suche nach den besten
+Hyperparametern beim Training oft der rechenintensivste Teil.  Aus
+diesem Grund unterstuetzt Palladium ein Parallelisieren dieses
+Vorgangs mit Hilfe von Computerclustern per
+[Dask](http://dask.pydata.org):
+
+> Dask is a flexible library for parallel computing in Python.
+
+---
+
+# Dask: Anwendung
+
+```bash
+$ pip install dask distributed
+```
+
+Wir starten nun den Scheduler in einem neuen Terminal-Fenster:
+
+```bash
+$ source bin/activate
+$ dask-scheduler
+```
+
+Und einen Worker in einem weiteren neuen Terminal-Fenster:
+
+```bash
+$ source bin/activate
+$ cd step4
+$ PYTHONPATH=. dask-worker 127.0.0.1:8786
+```
+
+An diesem Punkt koennten wir beliebig viele weitere Worker starten.
+
+Schliesslich starten wir unser Grid Search mit diesem Kommando:
+
+```bash
+$ PALLADIUM_CONFIG=config.py,dask-config.py pld-grid-search
+```
+
+---
+
+# Determine wine quality with Skorch
+
+Let's try the same neural net on a different dataset.  We'll use the
+[Wine Quality Data Set](https://www.openml.org/d/40691) to learn a
+model to predict the quality of wine based on a score between 0
+(awful) and 10 (fantastic).
+
+`step5` contains a copy of `step4`. First, we will have to implement a
+Palladium `DatasetLoader` to read the dataset.  We will then try to
+use the network from our last example to do the classification.
+
+Note that when you are finished implementing the DatasetLoader, you'll
+see an error trying to fit the neural network.
+
+---
+
+# Ein DatasetLoader fuer OpenML
+
+The configuration in `step5/config.py` was updated to refer to our new
+class `OpenML`, which reads our dataset from
+[OpenML.org](https://www.openml.org):
+
+```python
+    'dataset_loader_train': {
+        '__factory__': 'dataset.OpenML',
+        'name': 'wine-quality-red',
+    },
+```
+
+## Exercise 4
+
+Complete the implementation of the `OpenML` class in
+`step5/dataset.py`:
+
+```python
+from sklearn.datasets import fetch_openml
+
+class OpenML:
+    def __init__(self, name):
+        self.name = name
+
+    def __call__(self):
+        # YOUR CODE HERE:
+```
+
+---
+
+# MyModule: Input and output parameters
+
+## Exercise 4 (continued)
+
+The feature matrix of our new dataset has a shape (dimensionality)
+that is different to the shape of our Iris feature matrix.  Also, the
+number of classes is different.
+
+Determine the shape of the new feature matrix by adding print
+statements into your `OpenML` implementation.
+
+Try to find out which parameters to set in `step5/confg.py` so that
+the network can be trained:
+
+```python
+    'model': {
+        '__factory__': 'model.create_pipeline',
+        # YOUR CODE HERE:
+    },
+```
+
+As soon as you are able to train the network (use `pld-fit`), take a
+look at the Grid Search parameters inside the configuration file.  Can
+you find a configuration of hyperparameters with which you can reach
+an accuracy of 55% or more on the `mean_test_score`?
+
+---
+
+# Regression instead of classification
+
+We can pose the prediction of the wine quality score as a regression
+problem.  That is, instead of predicting probabilities for the 10 or
+so classes, we will try to predict a single number: the actual score
+as a continuous value between 0 and 10.
+
+## Exercise 5
+
+- We make a copy of `step5` and call the new directory `step6`
+- Our network needs to have one output instead of ten
+- The `softmax` function is not used in regression: remove it.
+- We use the `neg_mean_absolute_error_scorer` instead of
+  `accuracy_scorer`.
+- We make use of `NeuralNetRegressor` instead of `NeuralNetClassifier`
+- We'll replace our `PipelineY` with `sklearn.pipeline.Pipeline`.  The
+  `LabelEncoder` is no longer useful.  (tricky!)
+- Let's hack our `DatasetLoader` to return the target (or `y`) vector
+  as `float32`: `target = dataset.target.astype('float32')`.
+- For regression problems, Skorch expects a target of shape NxM, where
+  each sample can have multiple regression targets: `target =
+  target.reshape(-1, 1)`.
+
+---
+
+# Random Forest instead of neural network
+
+## Exercise 6
+
+- Rewrite the `model` entry in `step6/config.py` to use
+  `sklearn.ensemble.RandomForestRegressor` instead of our
+  `create_pipeline` function.
+
+  *Hint:* You'll need the following lines in your configuration:
+
+  ```python
+      'model': {
+          '__factory__': 'sklearn.ensemble.RandomForestRegressor',
+          # ...
+      },
+  ```
+
+- Read through the most important parameters of class
+  [`RandomForestregressor` in the scikit-learn
+  documentation](http://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestRegressor.html).
+  Use a few parameters to run a Grid Search.  What's the best
+  `mean_test_score` can you can get?
+
+---
+
+# Skorch: Sentiment analysis with RNNs
+
+Our last example demonstrates the use of RNNs to do sentiment analysis
+on text.  We use the [Large Movie Review
+Dataset](http://ai.stanford.edu/~amaas/data/sentiment/) to train our
+network.
+
+The implementation follows the `rnn_classifier` example within the
+Skorch source tree.  The implementation is already provided for you in
+`step7/config.py` and `step7/model.py`.  Before we dive into how the
+model works, let's train it:
+
+```bash
+$ cd ../step7
+$ pld-fit --evaluate
+```
+
+This may take a while if you're doing this on CPU.
+
+---
+
+# Sentiment analysis as a service
+
+After the training finished, we can fire up our webservice again:
+
+```bash
+$ pld-devserver
+```
+
+And then call it like so:
+
+http://localhost:5000/predict?text=A+fantastic+movie+despite+its+flaws
+
+The response should look similar to this:
+
+```json
+{"result":[0.348106294870377,0.651893734931946],
+ "metadata":{"status":"OK","error_code":0}}
+```
+
+---
+
+# Skorch: Sentiment analysis with RNNs (2)
+
+Let's take a look at the ["Predict sentiment on the IMDB Dataset"
+notebook](https://github.com/dnouri/skorch/blob/master/examples/rnn_classifer/RNN_sentiment_classification.ipynb)
+to understand how the model works.
+
+```bash
+$ pip install jupyter
+$ jupyter notebook
+```
+
+Look for `RNN_sentiment_classification.ipynb`.
+
+---
+
+# Fin
+
+- https://github.com/ottogroup/palladium
+- https://github.com/scikit-learn/scikit-learn
+- https://github.com/dnouri/skorch
+
+
+- daniel@naturalvision.de
+- [twitter.com/dnouri](https://twitter.com/dnouri)
+- [danielnouri.org](http://danielnouri.org)
+- [naturalvision.de](http://naturalvision.de)
+
+---
+
+    </textarea>
+    <script src="resources/remark.js" type="text/javascript">
+    </script>
+    <script type="text/javascript">
+      remark.macros.scale = function (percentage) {
+        var url = this;
+        return '<img src="' + url + '" style="width: ' + percentage + '" />';
+      };
+      var slideshow = remark.create();
+    </script>
+  </body>
+</html>
