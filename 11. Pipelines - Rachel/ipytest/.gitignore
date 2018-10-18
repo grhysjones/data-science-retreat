@@ -1,0 +1,14 @@
+/.eggs/
+/.cache/
+/.idea/
+/build/
+/dist/
+/tmp/
+
+__pycache__/
+*.pyc
+*.egg-info/
+.ipynb_checkpoints/
+.pytest_cache/
+.coverage
+
